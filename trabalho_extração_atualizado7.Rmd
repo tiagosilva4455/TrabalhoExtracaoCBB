@@ -1,0 +1,902 @@
+---
+---
+title: "Trabalho de ECBD"
+author: "Joana Araújo, Mariana Silva, Tiago Silva"
+date: "2023-04-13"
+output: html_document
+---
+# Explicação dos dados: 
+A caracterização molecular do cancro da mama é um dos objetivos de investigação do TCGA-BRCA. A informação foi recolhida como resultado de uma parceria entre o Nation Cancer Institute (NCI) e o National Human Genome Research Institute(NHGRI), e inclui dados clínicos, genómicos e transcriptómicos para mais de 1.000 doentes com cancro da mama. Os dados incluem detalhes clínicos sobre os pacientes, tais como a sua idade, sexo, fase do tumor e história do tratamento, bem como informação sobre as anomalias genómicas e transcriptómicas que ocorrem no cancro da mama.
+
+#Origem:
+O projecto TCGA-BRCA foi lançado como uma componente do projeto TCGA, que procura oferecer uma base de dados com as alterações genéticas em vários tipos de cancro. Muitos métodos genómicos e transcriptómicos, incluindo sequenciação de todo o genoma, sequenciação de todo o exoma, sequenciação de RNA, e perfil de metilação de DNA, foram utilizados no projeto TCGA-BRCA para analisar amostras de cancro da mama em larga escala.
+
+#Relevância:
+Devido ao facto de dar uma visão completa das modificações genómicas e transcriptómicas que ocorrem no cancro da mama, os dados do TCGA-BRCA são uma fonte importante para os investigadores que analisam esta doença. A informação pode ser utilizada para descobrir anomalias genéticas e epigenéticas únicas que apoiam o aparecimento e a propagação do cancro da mama, bem como para encontrar alvos terapêuticos prospectivos. O conjunto de dados TCGA-BRCA contém dados clínicos que podem ser utilizados para examinar a ligação entre alterações genéticas e resultados do paciente, bem como para encontrar biomarcadores que possam ser utilizados para prever o prognóstico de um paciente e a resposta ao tratamento. Os dados de TCGA-BRCA como um todo têm o potencial para melhorar drasticamente a nossa compreensão do cancro da mama e para orientar a criação de tratamentos mais eficientes para esta condição.
+
+# Preparação e preprocessamento
+##  Instalação de packages e Importação de libraries
+```{r}
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(ggplot2)
+library(summarytools)
+library(vioplot)
+library(car)
+library(DESeq2)
+library(org.Hs.eg.db)
+```
+
+#Recolha de dados de expressão e metadados
+
+## Importação de dados de expressão e metadados
+```{r}
+proj <- "TCGA-BRCA"
+query <- GDCquery(
+  project = proj,
+  data.category = "Transcriptome Profiling", 
+  data.type = "Gene Expression Quantification",
+  workflow.type = "STAR - Counts"
+)
+GDCdownload(query)
+
+data_rna_brca  <- GDCprepare(query)
+
+```
+
+### Importação do dados clínicos
+```{r}
+query_clin <- GDCquery(project = "TCGA-BRCA", 
+                       data.category = "Clinical",
+                       data.type = "Clinical Supplement", 
+                       data.format = "BCR Biotab")
+GDCdownload(query_clin)
+clinical.brca <- GDCprepare(query_clin)
+names(clinical.brca)
+```
+
+### Análise visual dos dados e do seu conteúdo e dimensão
+**Objetos da class RangedSummarizedExperiment**
+```{r}
+data_rna_brca
+```
+
+**Dados na matriz de contagens/"assay"**
+```{r}
+assayNames(data_rna_brca)
+```
+
+**Visualização dos 5 primeiros e últimos genes**
+```{r}
+rowRanges(data_rna_brca)
+```
+
+**Nome das linhas e das colunas**
+```{r}
+rownames(data_rna_brca)
+colnames(data_rna_brca)
+```
+
+**Dimensão e classe**
+```{r}
+dim(data_rna_brca)
+class(data_rna_brca)
+```
+As dimensões do objeto data_rna_brca são de 60660 linhas e 1231 colunas, das quais as linhas correspondem aos genes e as colunas às amostras.
+O objeto pertence a classe RangedSummarizedExperiment, que pertence ao package SummarizedExperiment.
+
+**Dados de expressão**
+```{r}
+assayNames(data_rna_brca)
+brca_assay <- round(assays(data_rna_brca)[["unstranded"]])
+brca_assay
+colnames(brca_assay)
+row.names(brca_assay)
+```
+
+**Sumarização dos dados**
+```{r}
+dfSummary(assay(data_rna_brca))
+```
+**Iniciar a partir do SummarizedExperiment**
+
+```{r}
+round( colSums(assay(data_rna_brca)) / 1e6, 1)
+```
+Tendo o nosso objeto SummarizedExperiment completamente anotado, podemos construir o objeto DESeqDataSet através dele, que será o starting point da nossa análise.Será realizado mais adiante neste trabalho.
+
+```{r}
+sum(is.na(assay(data_rna_brca)))
+```
+Verificamos a presença de valores omissos no dataset e vimos que não existem (NA=0).
+
+**Standardização**
+```{r}
+brca_assay = assay(data_rna_brca)
+brca_assay_scale = scale(brca_assay)
+```
+
+# Preparação do input para DESeq2
+###Preparação dos metadados
+
+Para analisarmos as colunas da matriz indicadas, vamos utilizar a componente colData, que armazena e gere dados de expressão genética. É um dataframe que contém informações sobre as amostras analisadas, como informações do fenótipo, condições experimentais, idade, sexo e outras. 
+```{r}
+meta_brca = colData(data_rna_brca)
+
+
+dim(meta_brca)
+class(meta_brca)
+colnames(meta_brca)
+```
+
+###Descrição das variáveis dos metadados
+Selecionamos algumas colunas correspondentes aos metadados que consideramos mais interessantes:
+
+meta_brca$race --> Indica a raça do paciente (american, indian or alaska native, asian, black or african american, not reported, white).
+
+meta_brca$age_at_index --> Indica a idade com a qual o paciente foi diagnosticado.
+
+meta_brca$gender --> Indica o género dos pacientes (male, female).
+
+meta_brca$definition --> Indica o tipo de tecido da amostra recolhida (Metastatic, Primary solid Tumor, Solid Tissue Normal)
+
+meta_brca$vital_status -->  Indica o estado vital do paciente no momento da recolha de dados. (Alive, Dead)
+
+meta_brca$paper_BRCA_Subtype_PAM50--> Indica o Subtipo do cancro da mama que o paciente apresenta. (Basal, Her2, LumA, LumB, Normal)
+
+meta_brca$paper_pathologic_stage --> Indica o estágio em que se encontra o cancro do paciente no momento da recolha de dados.(NA, Stage_I, Stage_II, Stage_III, Stage_IV).
+
+## Triagem dos dados
+A triagem ou filtragem dos dados é um processo essencial na análise dos dados, que envolve a seleção e organização de informações importantes relevantes a partir de um conjunto de dados.
+Para isto, foi necessário verificar as variáveis identificadas e certificar que estavam nos formatos apropriados para a análise estatística direta. No entanto, foi observado que várias dessas variáveis numéricas estavam em formato de texto, pelo que foram transformadas em variáveis numéricas (as.factor) que representam cada categoria ou nível na variável original.
+```{r}
+race = as.factor(meta_brca$race)
+age_diagonosis = meta_brca$age_at_index
+gender = as.factor(meta_brca$gender)
+tissue_type = as.factor(meta_brca$definition)
+vital_status = as.factor(meta_brca$vital_status)
+brca_subtype = as.factor(meta_brca$paper_BRCA_Subtype_PAM50)
+brca_state = as.factor(meta_brca$paper_pathologic_stage)
+```
+
+**Filtração de genes após transformação logarítmica**
+```{r}
+log_data <- log(brca_assay_scale)
+log_data_clean <- na.exclude(log_data)
+dim(log_data_clean)
+```
+Filtragem de genes cujo rácio do máximo valor sobre o mínimo valor de expressão seja superior a 2:
+```{r}
+maximos = apply(brca_assay_scale, 1, max)
+minimos = apply(brca_assay_scale, 1, min)
+valor_exp = maximos/minimos > 2
+filtered_data_brca <- brca_assay_scale[valor_exp, ]
+dim(filtered_data_brca)
+```
+```{r}
+class(log_data_clean)
+nrow(log_data_clean)
+row.names(log_data_clean)
+ncol(log_data_clean)
+colnames(log_data_clean)
+```
+**Histograma para verificar a normalidade dos dados**
+```{r}
+hist(log_data_clean, main = "Histograma dos dados")
+```
+Como apresenta uma forma de sino, assumimos a normalidade dos dados.
+
+**Heatmap**
+```{r}
+heat_1 = order(log_data_clean)
+heatmap(log_data_clean)
+```
+
+### Análise estatística univariada
+
+Descrição da distribuição dos dados, através do cálculo da média, mediana, desvio padrão e distância interqualtil:
+
+```{r}
+mean(log_data_clean)   #média
+median(log_data_clean) #mediana
+sd(log_data_clean)     #desvio-padrão
+IQR(log_data_clean)    #distância interquartil
+summary(log_data_clean)
+```
+
+### Sumário das variáveis objeto
+```{r}
+print(dfSummary(meta_brca, style = 'grid', graph.magnif = 1, valid.col = FALSE,
+                max.distinct.values = 5, col.widths = c(100, 200, 200, 350, 500, 250),
+                dfSummary.silent  = TRUE, headings = FALSE, justify = 'l')
+      , method = 'render', max.tbl.height = 500)
+```
+
+
+
+###Análise Exploratória das variáveis
+Para este processo, o primeiro passo foi verificar a presença de valores omissos (NA) nas variáveis a analisar e eliminá-las. Este passo é essencial, uma vez que este tipo de valores podem provocar transtornos nas análises estatísticas que pretendemos realizar.
+De seguida, realizamos análises visuais(gráficas das variáveis, de modo a facilitar visualização dos dados.
+
+### Análise Exploratória das Variáveis --> race 
+
+```{r}
+race = na.omit(race)
+table(race)
+qplot(race, fill = race, main = "Race")
+```
+
+O barplot é um gráfico que mostra a contagem ou frequência de um conjunto de dados categóricos, e é apropriado para o estudo da variável raça. A partir deste gráfico, vemos que a maior parte (880) dos casos estudados pertencem à raça "white", e apenas 1 caso pertence à raça "american indican ou alaskan".
+```{r}
+table = table(race)
+data = as.data.frame(table)
+slices=data$Freq 
+lbls=data$race
+pct=round(slices/sum(slices)*100)
+lbls=paste(lbls, pct) 
+lbls=paste(lbls,"%",sep="") 
+pie(slices,labels = lbls, col = heat.colors(5),
+   main="Race")
+```
+O piechart também é um tipo de gráfico circular que representa a proporção de cada categoria em relação a um todo. Neste caso de estudo que envolve a verificaçáo das raças dos participantes, o piechart consegue mostrar a distribuição percentual de cada raça. Por exemplo, conseguimos verificar que 72% identifica a raça "white" e 16% identifica a raça "black or african american". O pie chart é útil para identificar padrões e tendências nos dados e para comunicar visualmente a informação de forma clara e concisa.
+
+### Análise Exploratória das Variáveis  --> age_diagonosis 
+
+```{r}
+age_diagonosis = na.omit(age_diagonosis)
+table(age_diagonosis)
+hist((age_diagonosis), col = c("darkgrey") ,las=2, main = "Idade que o paciente foi diagnosticado com cancro da mama", xlab = "Idade (em anos)", ylab = "Frequència")
+```
+O histograma mostra a distribuição das frequências de um conjunto de dados contínuos, dividindo em intervalos e contando quandos valores estão dentro de cada intervalo. Isto permitirá observar a distribuição da idade em que os pacientes foram diagnosticados com mais detalhes sobre a densidade e forma de distribuição.
+Pela observação do histograma resultante, verifica-se uma maior frequência de casos de cancro da mama entre as idades dos 60-65 anos.
+```{r}
+boxplot(age_diagonosis, ylab = "Idade", col = "lightblue", main = "Idade que o paciente foi diagnosticado com cancro da mama")
+```
+O boxplot é um tipo de gráfico que é utilizado para mostrar a distribuição de um conjunto de dados numéricos, exibindo informações sobre a mediana, quartis, valores máximos e mínimos e outliers. Este tipo de gráfico é uma boa opção para mostrar a distribuição da variável "age_diagonosis" e identificar possíveis valores extremos, além de visualizar se a distribuição dos dados é simétrica ou não, ou se há alguma tendència central.
+Este boxplot mostra que a mediana se encontra entre os 60 anos, o primeiro quartil entre os 50 anos, e o terceiro quartil perto dos 70 anos, sendo que o valor mínimo se aproxima dos 26 anos e o máximo dos 90.
+
+```{r}
+vioplot(age_diagonosis, col = "orchid", ylab = "Idade(em anos)", main = "Distribuição da idade de diagnóstico")
+
+```
+O violinplot é outro tipo de gráfico utilizado para visualizar a distribuição de um conjunto de dados numéricos, com a vantagem de mostrar informações sobre a densidade da probabilidade, além dos quartis e da mediana.
+O resultado mostra um gráfico com a distribuição da idade de diagnóstico em forma de violino, com uma caixa central que representa a mediana, e as extremidades do violino representando a densidade de probabilidade da distribuição dos dados. Este vioplot corrobora a informação obtida anteriormente, onde a mediana se encontra nos 60 anos, e os primeiro e terceiro quartil aproximadamente nas idades de 50 e 70, respetivamente, e os valores mínimos e máximos nos 26 e 90 anos de idade.
+
+### Análise Exploratória das Variáveis  --> gender 
+
+```{r}
+gender = na.omit(gender)
+gender = table(gender)
+barplot(gender, ylab = "Número de pacientes", xlab = "Género", main = "Género com que os pacientes se identificam", col = c("pink","lightblue"))
+```
+
+```{r}
+table = table(gender)
+data = as.data.frame(table(gender))
+slices=data$Freq 
+lbls=data$gender
+pct=round(slices/sum(slices)*100)
+lbls=paste(lbls, pct) 
+lbls=paste(lbls,"%",sep="") 
+pie(slices,labels = lbls, col = c("pink", "lightblue"),
+   main="Género que os pacientes se identificam")
+```
+Verifica-se que 99% dos pacientes identificam-se com o sexo feminino e apenas 1% com o sexo masculino.
+
+### Análise Exploratória das Variáveis  --> tissue_type 
+```{r}
+qplot(tissue_type, fill = tissue_type, main = "Tipo de amostra de tecido")
+```
+
+```{r}
+table = table(tissue_type)
+data = as.data.frame(table)
+slices=data$Freq 
+lbls=data$tissue_type
+pct=round(slices/sum(slices)*100)
+lbls=paste(lbls, pct) 
+lbls=paste(lbls,"%",sep="") 
+pie(slices,labels = lbls, col = topo.colors(3),
+   main="Tipo de amostra de tecido")
+```
+Verifica-se que 90% do tecido recolhido é do tipo "Primary solid tumor", 9% é "Solid tissue normal" e 1% é "metastatic"
+
+### Análise Exploratória das Variáveis  --> vital_status 
+
+```{r}
+vital_status = na.omit(vital_status)
+qplot(vital_status, fill = vital_status, main = "Estado vital do paciente na recolha das amostras")
+```
+
+```{r}
+table = table(vital_status)
+data = as.data.frame(table)
+slices=data$Freq 
+lbls=data$vital_status
+pct=round(slices/sum(slices)*100)
+lbls=paste(lbls, pct) 
+lbls=paste(lbls,"%",sep="") 
+pie(slices,labels = lbls, col = c("green", "grey"),
+   main="Estado vital do paciente na recolha das amostras")
+```
+Verifica-se a partir da análise destes gráficos que os tecidos foram recolhidos de 84% pacientes vivos e 16% de pacientes mortos.
+
+
+### Análise Exploratória das Variáveis --> brca_subtype
+
+```{r}
+brca_subtype = na.omit(brca_subtype)
+qplot(brca_subtype, fill = brca_subtype)
+```
+### Análise Exploratória das Variáveis --> brca_state
+
+```{r}
+brca_state = na.omit(brca_state)
+brca_state = brca_state[brca_state != "NA"]
+qplot(brca_state, fill = brca_state)
+```
+
+# Testes estatísticos
+```{r}
+race = as.factor(meta_brca$race)
+age_diagonosis = meta_brca$age_at_index
+gender = as.factor(meta_brca$gender)
+tissue_type = as.factor(meta_brca$definition)
+vital_status = as.factor(meta_brca$vital_status)
+brca_subtype = as.factor(meta_brca$paper_BRCA_Subtype_PAM50)
+brca_state = as.factor(meta_brca$paper_pathologic_stage)
+```
+
+###Estudar a relação entre o género e a idade do diagnóstico
+
+**Teste à homogeneidade das variâncias - Teste de Levene**
+O teste de Levene é um teste estatístico usado para verificar a homogeneidade das variâncias de duas ou mais amostras. Ele é usado para avaliar se as variâncias das amostras são iguais ou diferentes, o que é importante para muitas análises estatísticas, incluindo a análise de variância (ANOVA).
+
+H0: A variância da idade do diagnóstico é igual entre o sexo feminino e o sexo masculino.
+H1: A variâcia da idade do diagnõstico é diferente entre o sexo feminino e o sexo masculino.
+```{r}
+leveneTest(age_diagonosis~gender)
+```
+O valor de p = 0.3553 é maior que o nível de significância comum (0.05), o que indica que não há evidèncias para rejetar a hipótese nula de que as variâncias são iguais.
+
+**Teste à média: T-student*
+O teste t de Student é um teste estatístico que é usado para avaliar se há diferenças significativas entre as médias de duas amostras independentes. O teste t de Student requer algumas suposições básicas, como a normalidade da distribuição das amostras e a igualdade das variâncias entre as amostras.
+
+H0: Não existem diferenças significativas entre as médias das idades de diagnóstico entre o sexo feminino e masculino. (média = 0)
+H1: Existem diferenças significativas entre as médias do sexo feminino e masculino e as idades de diagnóstico.
+```{r}
+t.test(age_diagonosis~gender, var = T)
+```
+O valor de p é igual a 0.2834, maior que o nível de significância comum (0.05), pelo que não existem evidências suficientes para se rejeitar a hipótese nula de que as médias de idade do diagnóstico entre pessoas do sexo feminino e do sexo masculino são iguais.
+Além disso, o intervalo de confiança de 95% para a diferença média entre as idades de diagnóstico de pessoas do sexo feminino e pessoas do sexo masculino varia de -11,253846 a 3,295184. Como o intervalo contém o valor zero, isso sugere que não há diferença significativa nas médias de idade de diagnóstico entre os dois grupos.
+
+**Teste Análise de Variància - ANOVA**
+H0: Não há diferenças significativas nas médias de idade do diagnóstico e no género do paciente.
+H1: Pelo menos uma média de idade do diagnóstico difere das outras médias de idade do diagnóstico e o género dos pacientes.
+```{r}
+anova <- aov(age_diagonosis~gender)
+anova
+summary(anova)
+```
+A soma dos quadrados para a variável "gender" foi de 203,68 e a soma dos quadrados dos resíduos foi de 217161.37. O teste também indica que a quantidade de graus de liberdade para "gender" é de 1 e para resíduos é de 1228. O valor do erro padrão residual foi estimado em 13,29818.
+Pelo summary(anova), o resultado indica que o teste ANOVA entre as variáveis age_diagonosis e gender apresentou um valor de F de 1,152 e um p-valor de 0,283. Isso sugere que não há diferença estatisticamente significativa entre as médias da idade de diagnóstico entre os grupos do sexo masculino e do sexo feminino.
+
+**Análise Gráfica: age_diagonosis~gender**
+```{r}
+boxplot(age_diagonosis~gender, data = meta_brca, main = "Idade no diagnóstico vs Género", xlab = "Género", ylab = "Idade (em anos)", col = c( "pink", "lightblue1"))
+```
+
+###Estudar a relação entre o tipo de tecido e a idade do diagnóstico
+**Teste à homogeneidade das variâncias - Teste de Levene**
+H0: A variância da idade do diagnóstico é igual entre os diferentes tipos de tecido.
+H1: A variância da idade do diagnõstico é diferente entre os diferentes tipos de tecido.
+```{r}
+leveneTest(age_diagonosis~tissue_type)
+```
+O resultado do teste de Levene indica que o valor de F é de 2.0789 e o valor de p é de 0.1255, pelo que não há evidências suficientes para rejeitar a hipótese nula de que as variâncias dos grupos são iguais. 
+
+
+**Teste Análise de Variància - ANOVA**
+H0: Não há diferenças significativas nas médias de idade do diagnóstico entre os diferentes tipos de tecido.
+H1: Pelo menos uma média de idade do diagnóstico difere das outras médias de idade do diagnóstico entre os diferentes tipos de tecido.
+```{r}
+anova <- aov(age_diagonosis~tissue_type)
+anova
+summary(anova)
+```
+O valor-p (Pr(>F)) para a fonte de variação "tissue_type" é de 0.00977, que é menor que o nível de significância de 0,05. Portanto, podemos rejeitar a hipótese nula de que não há diferenças significativas nas médias de idade do diagnóstico entre os diferentes tipos de tecido. Isso significa que há pelo menos um tipo de tecido cuja média de idade do diagnóstico é significativamente diferente dos outros.
+
+O valor F de 4.645 indica que a variação entre os grupos é maior do que a variação dentro dos grupos, o que sugere que o modelo é estatisticamente significativo. O Residual standard error representa a variância não explicada pelo modelo e a última linha informa que um dado foi excluído devido à ausência de dados.
+
+
+###Estudar a relação entre o tipo de tecido e o estado vital do paciente
+**Teste à homogeneidade das variâncias - Teste de Levene**
+H0: A variância da idade do diagnóstico e o seu estado vital é igual.
+H1: A variância da idade do diagnõstico  e o seu estado vital são diferentes.
+```{r}
+leveneTest(age_diagonosis~vital_status)
+```
+Uma vez que o valor Pr(>F) é menor que o nível significativo (3.308e-005 < 0.05), a hipótese nula é rejeitada, o que sugere que as variâncias das idades dos pacientes nos diferentes estados vitais (vivo ou morto) são diferentes.
+Por isso, seguimos para os testes não paramétricos (testes à mediana - Wilcox Test)
+
+**Teste à mediana: Wilcox test**
+O wilcox test é um teste não paramétrico que avalia se duas amostras independentes têm a mesma distribuição. A hipótese nula é que as duas amostras têm a mesma distribuição, enquanto a hipótese 
+H0: As duas amostras têm a mesma distribuição.
+H1: Existem diferenças significativas na mediana das idades de diagnóstico e o estado vital do paciente.
+```{r}
+wilcox.test(age_diagonosis~vital_status, var.equal = FALSE)
+```
+Uma vez que o valor p é menor que 0,05, temos evidências para rejeitar a hipótese nula e concluir que há uma diferença significativa nas medianas da idade no diagnóstico entre pacientes vivos e mortos.
+
+
+**Teste Análise de Variància - ANOVA**
+H0: Não há diferenças significativas nas médias de idade do diagnóstico e o estado vital dos pacientes.
+H1: Pelo menos uma média de idade do diagnóstico difere das outras médias de idade do diagnóstico e o estado vital dos pacientes
+```{r}
+anova <- aov(age_diagonosis ~ vital_status)
+anova
+summary(anova)
+```
+De acordo com o resultado da ANOVA, podemos ver que a diferença entre as médias dos grupos é estatisticamente significante (p = 0,002). Isso sugere que a idade no diagnóstico pode ter um impacto sobre o estado vital dos pacientes. No entanto, a ANOVA não indica qual dos grupos apresentou médias maiores ou menores.
+
+**Análise Gráfica: age_diagonosis~vital_status**
+```{r}
+boxplot(age_diagonosis~vital_status, data = meta_brca, main = "Idade no diagnóstico vs Estado vital do paciente", xlab = "Estado Vital", ylab = "Idade (em anos)", col = c( "lightgreen", "grey"))
+```
+
+#Análise da Expressão Diferencial
+##Expressão Diferencial - Definition (Tissue Type)
+```{r}
+library(DESeq2)
+data_de <- data_rna_brca[,!is.na(data_rna_brca$definition)]
+
+ddsSE_defi <- DESeqDataSet(data_de, design = ~ definition)
+
+keep <- rowSums(counts(ddsSE_defi)) >= 10 #filtragem de genes com mais de 10 cópias
+ddsSE_defi <- ddsSE_defi[keep,]
+ddsSE_defi =DESeq(ddsSE_defi)
+
+resultsNames(ddsSE_defi)
+
+#Tabelas de Resultados
+
+res1 <- results(ddsSE_defi, name = "definition_Primary.solid.Tumor_vs_Metastatic")
+res1
+res2<- results(ddsSE_defi, name = "definition_Solid.Tissue.Normal_vs_Metastatic")
+res2
+
+dea1 <- as.data.frame(res1)
+dea2 <- as.data.frame(res2)
+
+plot(dea1)
+plot(dea2)
+
+```
+
+###Exploração dos resultados- res1
+```{r}
+res1Ordered =res1[order(res1$padj),]
+summary(res1)
+```
+
+Número total de genes com reads diferentes de 0: 56.713
+
+Número de genes que apresentam um log2 fold change (LFC) maior que 0: 897 genes, o que representa 1,6% do total de genes analisados. Isso indica que esses genes estão sobrexpressos no grupo experimental do que no grupo controle.
+
+Número de genes que apresentam um log2 fold change menor que 0: 626 genes, o que representa 1,1% do total de genes analisados. Isso indica que esses genes estão subexpressos no grupo experimental do que no grupo controle.
+
+Percentagem de outliers: 0%
+
+Percentagem de genes com baixo valor de reads: 39%, ou seja, genes que têm uma contagem média inferior a 1, isso indica que esses genes são subexpressos e, portanto, menos confiáveis.
+
+Considerando aceitável uma percentagem de 10% de falsos positivos, podemos admitir que todos os genes com um valor de p adjusted abaixo de 0.1 como significativos.
+
+```{r}
+sum(res1$padj < 0.1, na.rm=TRUE)
+```
+
+1523 genes diferencialmente expressos dos quais 897 são sobrexpressos e 626 são subexpressos
+
+Agora subdefinimos a tabela de resultados para estes genes e ordenamo-los pela estimativa de log2 fold change, de modo a obtermos os genes significativos com a "down-regulation" mais forte...
+```{r}
+res1Sig <- subset(res1, padj < 0.1)
+head(res1Sig[ order(res1Sig$log2FoldChange), ])
+```
+... e com a "up-regulation" mais forte:
+```{r}
+head(res1Sig[ order(res1Sig$log2FoldChange, decreasing = TRUE), ])
+```
+
+**Top Gene**
+Corresponde ao gene com o menor valor de p adjusted.
+```{r}
+topgene <- rownames(res1)[which.min(res1$padj)]
+topgene
+```
+
+**Exploração Gráfica com MA plot**
+Um gráfico MA fornece uma visão geral útil da distribuição dos coeficientes estimados no modelo, por exemplo, as comparações de interesse, em todos os genes. No eixo y, o "M" significa "menos" - a subtração de valores log é equivalente ao log da razão - e no eixo x, o "A" significa "média".
+Este gráfico permitir-nos-á visualizar as principais diferenças de expressão genética entre dois grupos: genes diferencialmente expressos (azul) e outros genes (cinzento).
+```{r}
+DESeq2::plotMA(res1, ylim = c(-10,10))
+with(res1[topgene, ], {
+  DESeq2::plotMA(res1, ylim = c(-7,7), main="definition_Primary.solid.Tumor_vs_Metastatic")
+  points(baseMean, log2FoldChange, col="black", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topgene, pos=2, col="black")
+})
+```
+
+**Histograma de valores p**
+O histograma de valores p também é um bom gráfico diagnóstico. Este gráfico é melhor organizado se excluirmos os genes com contagens muito baixas, pois podem gerar picos no histograma.
+```{r}
+hist(res1$pvalue[res1$baseMean > 1], breaks = 0:20/20,
+     col = "grey50", border = "white", main='Histograma de valores p')
+```
+
+
+###Exploração dos resultados res2
+```{r}
+res2Ordered =res2[order(res2$padj),]
+summary(res2)
+```
+Número total de genes com contagem de leitura diferente de zero: 56.713
+
+Número de genes que apresentam um log2 fold change (LFC) maior que 0: 4.150 genes, o que representa 7,3% do total de genes analisados. Isso indica que esses genes estão sobrexpressos no grupo experimental do que no grupo controle.
+
+Número de genes que apresentam um log2 fold change menor que 0: 5.400 genes, o que representa 9,5% do total de genes analisados. Isso indica que esses genes estão subexpressos no grupo experimental do que no grupo controle.
+
+Percentagem de outliers: 0%
+
+Percentagem de genes com contagens baixas: 37%, ou seja, genes que têm uma contagem média inferior a 1. Isso pode indicar que esses genes são pouco expressos e, portanto, menos confiáveis.
+
+```{r}
+sum(res2$padj < 0.1, na.rm=TRUE)
+```
+
+9550 genes diferencialmente expressos dos quais 4150 são sobrexpressos e 5400 são subexpressos
+
+Agora subdefinimos a tabela de resultados para estes genes e ordenamo-los pela estimativa de log2 fold change, de modo a obtermos os genes significativos com a "down-regulation" mais forte...
+```{r}
+res2Sig <- subset(res2, padj < 0.1)
+head(res2Sig[ order(res2Sig$log2FoldChange), ])
+```
+... e com a "up-regulation" mais forte:
+```{r}
+head(res2Sig[ order(res2Sig$log2FoldChange, decreasing = TRUE), ])
+```
+
+**Top Gene**
+Corresponde ao gene com o menor valor de p adjusted.
+```{r}
+topgene <- rownames(res2)[which.min(res2$padj)]
+topgene
+```
+
+**Exploração Gráfica com MA plot**
+Genes Diferencialmente Expressos: azul
+Outros genes: cinzento
+```{r}
+DESeq2::plotMA(res2, ylim = c(-10,10))
+with(res2[topgene, ], {
+  points(baseMean, log2FoldChange, col="black", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topgene, pos=2, col="black")
+})
+```
+
+**Histograma de valores p**
+```{r}
+hist(res2$pvalue[res2$baseMean > 1], breaks = 0:20/20,
+     col = "grey50", border = "white", main='Histograma de valores p')
+```
+
+**Transformação de dados**
+Para realizar os testes de expressão diferencial devem-se utilizar as contagens semqualquer transformação, utilizando distribuições discretas. Para ajudar a visualização dos dados pode ser útil realizar transformações sobre os dados (a mais usada a transformação logarítmica)
+• VST: Variance Stabilizing Transformation – mantém a variância independente da média
+```{r}
+vst = varianceStabilizingTransformation(ddsSE_defi,blind = FALSE)
+head(assay(vst),3)
+```
+
+```{r}
+head(counts(ddsSE_defi),3)
+```
+
+##Expressão Diferencial - BRCA Subtype
+```{r}
+data_de = data_rna_brca[,!is.na(data_rna_brca$paper_BRCA_Subtype_PAM50)]
+ddsSE_subtype = DESeqDataSet(data_de, design = ~ paper_BRCA_Subtype_PAM50)
+keep = rowSums(counts(ddsSE_subtype)) >= 10
+ddsSE_subtype = ddsSE_subtype[keep,]
+ddsSE_subtype = DESeq(ddsSE_subtype)
+resultsNames(ddsSE_subtype)
+```
+
+```{r}
+res_subtype = results(ddsSE_subtype, name = "paper_BRCA_Subtype_PAM50_Her2_vs_Basal") 
+dea = as.data.frame(res_subtype)
+resOrdered_subtype = res_subtype[order(res_subtype$padj),]
+summary(res_subtype)
+```
+
+Número total de genes com reads diferentes de 0: 56583
+
+Número de genes que apresentam um log2 fold change (LFC) maior que 0: 7703 genes, o que representa 14% do total de genes analisados. Isso indica que esses genes estão sobrexpressos no grupo experimental do que no grupo controle.
+
+Número de genes que apresentam um log2 fold change menor que 0: 20472 genes, o que representa 36% do total de genes analisados. Isso indica que esses genes estão subexpressos no grupo experimental do que no grupo controle.
+
+Percentagem de outliers: 0%
+
+Percentagem de genes com baixo valor de reads: 17%, ou seja, genes que têm uma contagem média inferior a 1, isso indica que esses genes são subexpressos e, portanto, menos confiáveis.
+
+Considerando aceitável uma percentagem de 10% de falsos positivos, podemos admitir que todos os genes com um valor de p adjusted abaixo de 0.1 como significativos.
+
+```{r}
+sum(res_subtype$padj < 0.1, na.rm=TRUE)
+```
+
+28175 genes diferencialmente expressos dos quais 7703 são sobrexpressos e 20472 são subexpressos
+
+Agora subdefinimos a tabela de resultados para estes genes e ordenamo-los pela estimativa de log2 fold change, de modo a obtermos os genes significativos com a "down-regulation" mais forte...
+```{r}
+resSig <- subset(res_subtype, padj < 0.1)
+head(resSig[ order(resSig$log2FoldChange), ])
+```
+... e com a "up-regulation" mais forte:
+```{r}
+head(resSig[ order(resSig$log2FoldChange, decreasing = TRUE), ])
+```
+
+**Top Gene**
+Corresponde ao gene com o menor valor de p adjusted.
+```{r}
+topgene <- rownames(res_subtype)[which.min(res_subtype$padj)]
+topgene
+```
+
+**Exploração Gráfica com MA plot**
+Genes Diferencialmente Expressos: azul
+Outros genes: cinzento
+```{r}
+DESeq2::plotMA(res_subtype, ylim = c(-7,7))
+with(res_subtype[topgene, ], {
+  points(baseMean, log2FoldChange, col="black", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topgene, pos=2, col="black")
+})
+```
+
+**Histograma de valores p**
+```{r}
+hist(res_subtype$pvalue[res_subtype$baseMean > 1], breaks = 0:20/20,
+     col = "grey50", border = "white", main='Histograma de valores p')
+```
+
+
+
+##subtype2
+```{r}
+res_subtype2 = results(ddsSE_subtype, name = "paper_BRCA_Subtype_PAM50_LumA_vs_Basal") 
+dea = as.data.frame(res_subtype2)
+resOrdered_subtype2 = res_subtype2[order(res_subtype2$padj),]
+summary(res_subtype2)
+```
+
+Número total de genes com reads diferentes de 0: 56583
+
+Número de genes que apresentam um log2 fold change (LFC) maior que 0: 11530 genes, o que representa 20% do total de genes analisados. Isso indica que esses genes estão sobrexpressos no grupo experimental do que no grupo controle.
+
+Número de genes que apresentam um log2 fold change menor que 0: 22778 genes, o que representa 40% do total de genes analisados. Isso indica que esses genes estão subexpressos no grupo experimental do que no grupo controle.
+
+Percentagem de outliers: 0%
+
+Percentagem de genes com baixo valor de reads: 16%, ou seja, genes que têm uma contagem média inferior a 1, isso indica que esses genes são subexpressos e, portanto, menos confiáveis.
+
+Considerando aceitável uma percentagem de 10% de falsos positivos, podemos admitir que todos os genes com um valor de p adjusted abaixo de 0.1 como significativos.
+
+```{r}
+sum(res_subtype2$padj < 0.1, na.rm=TRUE)
+```
+
+34308 genes diferencialmente expressos dos quais 11530 são sobrexpressos e 22778 são subexpressos
+
+Agora subdefinimos a tabela de resultados para estes genes e ordenamo-los pela estimativa de log2 fold change, de modo a obtermos os genes significativos com a "down-regulation" mais forte...
+```{r}
+resSig <- subset(res_subtype2, padj < 0.1)
+head(resSig[ order(resSig$log2FoldChange), ])
+```
+... e com a "up-regulation" mais forte:
+```{r}
+head(resSig[ order(resSig$log2FoldChange, decreasing = TRUE), ])
+```
+
+**Top Gene**
+Corresponde ao gene com o menor valor de p adjusted.
+```{r}
+topgene <- rownames(res_subtype2)[which.min(res_subtype2$padj)]
+topgene
+```
+
+**Exploração Gráfica com MA plot**
+Genes Diferencialmente Expressos: azul
+Outros genes: cinzento
+```{r}
+DESeq2::plotMA(res_subtype2, ylim = c(-7,7))
+with(res_subtype2[topgene, ], {
+  points(baseMean, log2FoldChange, col="black", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topgene, pos=2, col="black")
+})
+```
+
+**Histograma de valores p**
+```{r}
+hist(res_subtype2$pvalue[res_subtype2$baseMean > 1], breaks = 0:20/20,
+     col = "grey50", border = "white", main='Histograma de valores p')
+```
+
+##subtype3
+```{r}
+res_subtype3 = results(ddsSE_subtype, name = "paper_BRCA_Subtype_PAM50_LumB_vs_Basal") 
+dea = as.data.frame(res_subtype3)
+resOrdered_subtype3 = res_subtype3[order(res_subtype3$padj),]
+summary(res_subtype3)
+```
+
+Número total de genes com reads diferentes de 0: 56583
+
+Número de genes que apresentam um log2 fold change (LFC) maior que 0: 9784 genes, o que representa 17% do total de genes analisados. Isso indica que esses genes estão sobrexpressos no grupo experimental do que no grupo controle.
+
+Número de genes que apresentam um log2 fold change menor que 0: 24808 genes, o que representa 44% do total de genes analisados. Isso indica que esses genes estão subexpressos no grupo experimental do que no grupo controle.
+
+Percentagem de outliers: 0%
+
+Percentagem de genes com baixo valor de reads: 16%, ou seja, genes que têm uma contagem média inferior a 1, isso indica que esses genes são subexpressos e, portanto, menos confiáveis.
+
+Considerando aceitável uma percentagem de 10% de falsos positivos, podemos admitir que todos os genes com um valor de p adjusted abaixo de 0.1 como significativos.
+
+```{r}
+sum(res_subtype3$padj < 0.1, na.rm=TRUE)
+```
+
+34592 genes diferencialmente expressos dos quais 9784 são sobrexpressos e 24808 são subexpressos
+
+Agora subdefinimos a tabela de resultados para estes genes e ordenamo-los pela estimativa de log2 fold change, de modo a obtermos os genes significativos com a "down-regulation" mais forte...
+```{r}
+resSig <- subset(res_subtype3, padj < 0.1)
+head(resSig[ order(resSig$log2FoldChange), ])
+```
+... e com a "up-regulation" mais forte:
+```{r}
+head(resSig[ order(resSig$log2FoldChange, decreasing = TRUE), ])
+```
+
+**Top Gene**
+Corresponde ao gene com o menor valor de p adjusted.
+```{r}
+topgene <- rownames(res_subtype3)[which.min(res_subtype2$padj)]
+topgene
+```
+
+**Exploração Gráfica com MA plot**
+Genes Diferencialmente Expressos: azul
+Outros genes: cinzento
+```{r}
+DESeq2::plotMA(res_subtype3, ylim = c(-7,7))
+with(res_subtype3[topgene, ], {
+  points(baseMean, log2FoldChange, col="black", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topgene, pos=2, col="black")
+})
+```
+
+**Histograma de valores p**
+```{r}
+hist(res_subtype3$pvalue[res_subtype3$baseMean > 1], breaks = 0:20/20,
+     col = "grey50", border = "white", main='Histograma de valores p')
+```
+
+##subtype4
+```{r}
+res_subtype4 = results(ddsSE_subtype, name = "paper_BRCA_Subtype_PAM50_Normal_vs_Basal") 
+dea = as.data.frame(res_subtype4)
+resOrdered_subtype4 = res_subtype4[order(res_subtype4$padj),]
+summary(res_subtype4)
+```
+
+Número total de genes com reads diferentes de 0: 56583
+
+Número de genes que apresentam um log2 fold change (LFC) maior que 0: 9784 genes, o que representa 17% do total de genes analisados. Isso indica que esses genes estão sobrexpressos no grupo experimental do que no grupo controle.
+
+Número de genes que apresentam um log2 fold change menor que 0: 24808 genes, o que representa 44% do total de genes analisados. Isso indica que esses genes estão subexpressos no grupo experimental do que no grupo controle.
+
+Percentagem de outliers: 0%
+
+Percentagem de genes com baixo valor de reads: 16%, ou seja, genes que têm uma contagem média inferior a 1, isso indica que esses genes são subexpressos e, portanto, menos confiáveis.
+
+Considerando aceitável uma percentagem de 10% de falsos positivos, podemos admitir que todos os genes com um valor de p adjusted abaixo de 0.1 como significativos.
+
+```{r}
+sum(res_subtype4$padj < 0.1, na.rm=TRUE)
+```
+
+34592 genes diferencialmente expressos dos quais 9784 são sobrexpressos e 24808 são subexpressos
+
+Agora subdefinimos a tabela de resultados para estes genes e ordenamo-los pela estimativa de log2 fold change, de modo a obtermos os genes significativos com a "down-regulation" mais forte...
+```{r}
+resSig <- subset(res_subtype4, padj < 0.1)
+head(resSig[ order(resSig$log2FoldChange), ])
+```
+... e com a "up-regulation" mais forte:
+```{r}
+head(resSig[ order(resSig$log2FoldChange, decreasing = TRUE), ])
+```
+
+**Top Gene**
+Corresponde ao gene com o menor valor de p adjusted.
+```{r}
+topgene <- rownames(res_subtype4)[which.min(res_subtype2$padj)]
+topgene
+```
+
+**Exploração Gráfica com MA plot**
+Genes Diferencialmente Expressos: azul
+Outros genes: cinzento
+```{r}
+DESeq2::plotMA(res_subtype4, ylim = c(-7,7))
+with(res_subtype4[topgene, ], {
+  points(baseMean, log2FoldChange, col="black", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topgene, pos=2, col="black")
+})
+```
+
+**Histograma de valores p**
+```{r}
+hist(res_subtype3$pvalue[res_subtype4$baseMean > 1], breaks = 0:20/20,
+     col = "grey50", border = "white", main='Histograma de valores p')
+```
+
+**Transformação de dados**
+Para realizar os testes de expressão diferencial devem-se utilizar as contagens semqualquer transformação, utilizando distribuições discretas. Para ajudar a visualização dos dados pode ser útil realizar transformações sobre os dados (a mais usada a transformação logarítmica)
+• VST: Variance Stabilizing Transformation – mantém a variância independente da média
+```{r}
+vst = varianceStabilizingTransformation(ddsSE_subtype,blind = FALSE)
+head(assay(vst),3)
+```
+
+```{r}
+head(counts(ddsSE_subtype),3)
+```
+
+#Análise de Enriquecimento para res1 e res2 (definition)
+```{r}
+get_entrez <- function(x){unlist(strsplit(x, split="[.]+"))[2]}
+enr1 <- select(org.Hs.eg.db,keys=sapply(rownames(res1), get_entrez),columns=c("ENTREZID","SYMBOL","GENENAME"))
+head(enr1)
+res_enr1 <- cbind(res1, enr1)
+head(res_enr1)
+```
+
+
+```{r}
+get_entrez <- function(x){unlist(strsplit(x, split="[.]+"))[2]}
+enr2 <- select(org.Hs.eg.db,keys=sapply(rownames(res2), get_entrez),columns=c("ENTREZID","SYMBOL","GENENAME"))
+head(enr2)
+res_enr2 <- cbind(res2, enr2)
+head(res_enr2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
