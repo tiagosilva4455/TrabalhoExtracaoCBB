@@ -227,16 +227,6 @@ qplot(race, fill = race, main = "Race")
 ```
 
 O barplot é um gráfico que mostra a contagem ou frequência de um conjunto de dados categóricos, e é apropriado para o estudo da variável raça. A partir deste gráfico, vemos que a maior parte (880) dos casos estudados pertencem à raça "white", e apenas 1 caso pertence à raça "american indican ou alaskan".
-```{r}
-slices=data$Freq 
-lbls=data$race
-pct=round(slices/sum(slices)*100)
-lbls=paste(lbls, pct) 
-lbls=paste(lbls,"%",sep="") 
-pie(slices,labels = lbls, col = heat.colors(5),
-   main="Race")
-```
-O piechart também é um tipo de gráfico circular que representa a proporção de cada categoria em relação a um todo. Neste caso de estudo que envolve a verificaçáo das raças dos participantes, o piechart consegue mostrar a distribuição percentual de cada raça. Por exemplo, conseguimos verificar que 72% identifica a raça "white" e 16% identifica a raça "black or african american". O pie chart é útil para identificar padrões e tendências nos dados e para comunicar visualmente a informação de forma clara e concisa.
 
 ### Análise Exploratória das Variáveis  --> age_diagonosis 
 
@@ -334,16 +324,6 @@ qplot(brca_state, fill = brca_state)
 
 # Testes estatísticos
 ###Estudar a relação entre o género e a idade do diagnóstico
-
-**Teste à homogeneidade das variâncias - Teste de Levene**
-O teste de Levene é um teste estatístico usado para verificar a homogeneidade das variâncias de duas ou mais amostras. Ele é usado para avaliar se as variâncias das amostras são iguais ou diferentes, o que é importante para muitas análises estatísticas, incluindo a análise de variância (ANOVA).
-
-H0: A variância da idade do diagnóstico é igual entre o sexo feminino e o sexo masculino.
-H1: A variâcia da idade do diagnõstico é diferente entre o sexo feminino e o sexo masculino.
-```{r}
-leveneTest(age_diagonosis~gender)
-```
-O valor de p = 0.3553 é maior que o nível de significância comum (0.05), o que indica que não há evidèncias para rejetar a hipótese nula de que as variâncias são iguais.
 
 **Teste à média: T-student*
 O teste t de Student é um teste estatístico que é usado para avaliar se há diferenças significativas entre as médias de duas amostras independentes. O teste t de Student requer algumas suposições básicas, como a normalidade da distribuição das amostras e a igualdade das variâncias entre as amostras.
