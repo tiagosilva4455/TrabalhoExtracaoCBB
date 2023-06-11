@@ -1,0 +1,1113 @@
+---
+title: "Trabalho ECBD"
+output: html_document
+date: "2023-06-06"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Preparação e preprocessamento
+
+## Instalação de packages e Importação de libraries
+
+```{r}
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(ggplot2)
+library(summarytools)
+library(vioplot)
+library(car)
+library(DESeq2)
+library(org.Hs.eg.db)
+library(pheatmap)
+```
+
+#Recolha de dados de expressão e metadados
+
+## Importação de dados de expressão e metadados
+
+```{r}
+proj <- "TCGA-BRCA"
+query <- GDCquery(
+  project = proj,
+  data.category = "Transcriptome Profiling", 
+  data.type = "Gene Expression Quantification",
+  workflow.type = "STAR - Counts"
+)
+
+data_rna_brca  <- GDCprepare(query, summarizedExperiment = TRUE, save = TRUE, save.filename = "TCGA_BRCA.rda")
+
+```
+
+### Análise visual dos dados e do seu conteúdo e dimensão
+
+**Dados na matriz de contagens/"assay"**
+
+```{r}
+
+assay = assayNames(data_rna_brca)
+assay
+```
+
+**Objetos da class RangedSummarizedExperiment**
+
+```{r}
+class(data_rna_brca)
+dim(data_rna_brca)
+```
+
+O dataset apresenta 60660 linhas e 1231 colunas. Cada linha representa
+um gene e as colunas cada amostra analisada.
+
+**Visualização dos 5 primeiros e últimos genes**
+
+```{r}
+rowRanges(data_rna_brca)
+```
+
+**Nome das linhas e das colunas**
+
+```{r}
+rownames(data_rna_brca)
+colnames(data_rna_brca)
+```
+
+**Dados de expressão**
+
+```{r}
+assayNames(data_rna_brca)
+brca_assay <- round(assays(data_rna_brca)[["unstranded"]])
+brca_assay
+```
+
+**Sumarização dos dados**
+
+```{r}
+dfSummary(assay(data_rna_brca))
+```
+
+## Exploração dos metadados e análise descritiva
+
+Primeiro, vamos verificar a estrutura dos metadados, nomeadamento as
+suas dimensões, class e o nome das colunas, através do colData. Os
+metadados contém informações dos dados clínicos, como sexo, ano de
+diagnístico, tipo de células tumorais, entre outros.
+
+```{r}
+meta_brca = colData(data_rna_brca)
+
+
+dim(meta_brca)
+class(meta_brca)
+#colnames(meta_brca)
+```
+
+Os metadados possuem 1231 linhas que correspondem às amostras e 87
+colunas.
+
+```{r}
+sum(is.na(data_rna_brca))
+```
+
+Os dados não possuem valores "NA".
+
+##Análise de variáveis Realizamos análises visuais/gráficas das
+variáveis, de modo a facilitar visualização dos dados.
+
+```{r}
+race = meta_brca$race
+age_diagnosis = meta_brca$age_at_index
+gender = meta_brca$gender
+tissue_type = meta_brca$definition
+vital_status = meta_brca$vital_status
+brca_subtype = as.factor(meta_brca$paper_BRCA_Subtype_PAM50)
+brca_state = as.factor(meta_brca$paper_pathologic_stage)
+year = meta_brca$year_of_diagnosis
+```
+
+### Análise Exploratória das Variáveis --\> race
+
+```{r}
+race = na.omit(race)
+table(race)
+qplot(race, fill = race, main = "Race")
+```
+
+O barplot é um gráfico que mostra a contagem ou frequência de um
+conjunto de dados categóricos, e é apropriado para o estudo da variável
+raça. A partir deste gráfico, vemos que a maior parte (880) dos casos
+estudados pertencem à raça "white", e apenas 1 caso pertence à raça
+"american indican ou alaskan".
+
+```{r}
+table = table(race)
+data = as.data.frame(table)
+slices=data$Freq 
+lbls=data$race
+pct=round(slices/sum(slices)*100)
+lbls=paste(lbls, pct) 
+lbls=paste(lbls,"%",sep="") 
+pie(slices,labels = lbls, col = heat.colors(5),
+   main="Race")
+```
+
+O piechart também é um tipo de gráfico circular que representa a
+proporção de cada categoria em relação a um todo. Neste caso de estudo
+que envolve a verificaçáo das raças dos participantes, o piechart
+consegue mostrar a distribuição percentual de cada raça. Por exemplo,
+conseguimos verificar que 72% identifica a raça "white" e 16% identifica
+a raça "black or african american". O pie chart é útil para identificar
+padrões e tendências nos dados e para comunicar visualmente a informação
+de forma clara e concisa.
+
+### Análise Exploratória das Variáveis --\> age_diagonosis
+
+```{r}
+age_diagnosis = na.omit(age_diagnosis)
+table(age_diagnosis)
+hist((age_diagnosis), col = c("darkgrey") ,las=2, main = "Idade que o paciente foi diagnosticado com cancro da mama", xlab = "Idade (em anos)", ylab = "Frequència")
+```
+
+O histograma mostra a distribuição das frequências de um conjunto de
+dados contínuos, dividindo em intervalos e contando quandos valores
+estão dentro de cada intervalo. Isto permitirá observar a distribuição
+da idade em que os pacientes foram diagnosticados com mais detalhes
+sobre a densidade e forma de distribuição. Pela observação do histograma
+resultante, verifica-se uma maior frequência de casos de cancro da mama
+entre as idades dos 60-65 anos.
+
+```{r}
+boxplot(age_diagnosis, ylab = "Idade", col = "lightblue", main = "Idade que o paciente foi diagnosticado com cancro da mama")
+```
+
+O boxplot é um tipo de gráfico que é utilizado para mostrar a
+distribuição de um conjunto de dados numéricos, exibindo informações
+sobre a mediana, quartis, valores máximos e mínimos e outliers. Este
+tipo de gráfico é uma boa opção para mostrar a distribuição da variável
+"age_diagonosis" e identificar possíveis valores extremos, além de
+visualizar se a distribuição dos dados é simétrica ou não, ou se há
+alguma tendència central. Este boxplot mostra que a mediana se encontra
+entre os 60 anos, o primeiro quartil entre os 50 anos, e o terceiro
+quartil perto dos 70 anos, sendo que o valor mínimo se aproxima dos 26
+anos e o máximo dos 90.
+
+```{r}
+vioplot(age_diagnosis, col = "orchid", ylab = "Idade(em anos)", main = "Distribuição da idade de diagnóstico")
+
+```
+
+O violinplot é outro tipo de gráfico utilizado para visualizar a
+distribuição de um conjunto de dados numéricos, com a vantagem de
+mostrar informações sobre a densidade da probabilidade, além dos quartis
+e da mediana. O resultado mostra um gráfico com a distribuição da idade
+de diagnóstico em forma de violino, com uma caixa central que representa
+a mediana, e as extremidades do violino representando a densidade de
+probabilidade da distribuição dos dados. Este vioplot corrobora a
+informação obtida anteriormente, onde a mediana se encontra nos 60 anos,
+e os primeiro e terceiro quartil aproximadamente nas idades de 50 e 70,
+respetivamente, e os valores mínimos e máximos nos 26 e 90 anos de
+idade.
+
+### Análise Exploratória das Variáveis --\> tissue_type
+
+```{r}
+qplot(tissue_type, fill = tissue_type, main = "Tipo de amostra de tecido")
+```
+
+```{r}
+table = table(tissue_type)
+data = as.data.frame(table)
+slices=data$Freq 
+lbls=data$tissue_type
+pct=round(slices/sum(slices)*100)
+lbls=paste(lbls, pct) 
+lbls=paste(lbls,"%",sep="") 
+pie(slices,labels = lbls, col = topo.colors(3),
+   main="Tipo de amostra de tecido")
+```
+
+Verifica-se que 90% do tecido recolhido é do tipo "Primary solid tumor",
+9% é "Solid tissue normal" e 1% é "metastatic"
+
+### Análise Exploratória das Variáveis --\> vital_status
+
+```{r}
+vital_status = na.omit(vital_status)
+qplot(vital_status, fill = vital_status, main = "Estado vital do paciente na recolha das amostras")
+```
+
+```{r}
+table = table(vital_status)
+data = as.data.frame(table)
+slices=data$Freq 
+lbls=data$vital_status
+pct=round(slices/sum(slices)*100)
+lbls=paste(lbls, pct) 
+lbls=paste(lbls,"%",sep="") 
+pie(slices,labels = lbls, col = c("green", "grey"),
+   main="Estado vital do paciente na recolha das amostras")
+```
+
+Verifica-se a partir da análise destes gráficos que os tecidos foram
+recolhidos de 84% pacientes vivos e 16% de pacientes mortos.
+
+#Frequência das patologias BRCA
+
+```{r}
+brca_path = na.omit(meta_brca$paper_BRCA_Pathology)
+brca_path = brca_path[brca_path!="NA"]
+freq_table <- table(brca_path)
+
+pie(freq_table,
+    main = "Distribuição por tipo de tumor",
+    col = rainbow(length(freq_table)),
+    border = "white",
+    labels = paste(names(freq_table), ": ", freq_table, sep = ""))
+```
+
+Este gráfico mostra-nos os dois tipos de cancro da mama que são mais
+incidentes nos dados, o IDC (Infiltrating ductal carcinoma) e o ILC
+(Invasive lobular carcinoma), com 526 e 137 casos respetivamente.
+Segundo a literatura estes são os dois principais tipos de cancro da
+mama.
+
+###Análise Exploratória das Variáveis --\> brca_subtype
+
+```{r}
+brca_subtype = na.omit(brca_subtype)
+qplot(brca_subtype, fill = brca_subtype)
+```
+
+Pela análise do gráfico, conseguimos perceber que o subtype mais comum é
+o LumA. Esta informação vai de encontro com a literatura encontrada.
+
+### Análise Exploratória das Variáveis --\> brca_state
+
+```{r}
+brca_state = na.omit(brca_state)
+brca_state = brca_state[brca_state != "NA"]
+qplot(brca_state, fill = brca_state)
+```
+
+O gráfico mostra-nos que mais de 600 amostras recolhidas se encontravam
+no Stage II da doença.
+
+### Análise exploratória das variáveis -\> year
+
+```{r}
+year = na.omit(year)
+barplot(table(year), main = "Ano da recolha das amostras", )
+```
+
+A partir da análise do gráfico, percebemos que a maioria dos casos foram
+registados no ano 2010.
+
+###Frequência de género
+
+```{r}
+counts <- table(meta_brca$gender)
+colors <- c("pink", "lightblue")
+percentages <- round(prop.table(counts) *100,1)
+pie(counts, col = colors, main = "Distribuição por género")
+labels <- paste(names(counts), "(", percentages, "%", ")", sep = "")
+legend("topright", legend = labels, fill = colors)
+
+```
+
+Atravé deste gráfico circular consegue-se perceber que a incidencia do
+gene-BRCA é mais comun no sexo feminino (98.9%) do que no sexo masculino
+(1.1%).
+
+É possível fazer o teste estatístico para comparar a frequência de
+pacientes do sexo feminino e mascuino. O teste que vamos realizar é do
+chi-quadrado, de modo a determinar se há relações entre as variáveis.
+
+```{r}
+chisq.test(counts)
+```
+
+O resultado do chi-quadrado, com valor p = 2.2e-16, significa que existe
+uma diferença significativa entre as proporções observadas nos dados e
+as proporções esperadas, com base nas probabilidades fornecidas.
+Portanto, podemos rejeitar a hipótese nula de que não há associação
+entre as variáveis e concluir que existe uma relação estatisticamente
+significativa entre elas.
+
+###Filtragem dos dados not reported
+
+```{r}
+data_merge<-data.frame(vital_status,age_diagnosis)
+data_merge<-na.omit(data_merge)
+not_reported <- which(apply(data_merge, 1, function(x) any(x == "Not Reported")))
+clean_data <- subset(data_merge, !row.names(data_merge) %in% not_reported)
+```
+
+###Relação entre idade de diagnóstico e estado vital Com o objetivo de
+verificar se realmente se há relação entre a idade de diagnóstico e o
+estado vital do paciente, procedemos a uma análise das duas variáveis.
+
+```{r}
+vital_age <- data.frame(status_vital = (meta_brca$vital_status), idade_diagnostico = (meta_brca$age_at_index))
+
+vital_age <- na.omit(vital_age)
+```
+
+Para verificar se de facto há diferença estatística entre as médias de
+idade de diagnóstico da doença nos diferentes estados vitais do
+paciente, foi realizado um teste t.
+
+```{r}
+dead_data <- subset(meta_brca, meta_brca$vital_status == "Dead") 
+
+alive_data <- subset(meta_brca, meta_brca$vital_status == "Alive")
+
+var_test <- var.test(alive_data$age_at_index, dead_data$age_at_index)  
+
+test_t <- t.test(alive_data$age_at_index, dead_data$age_at_index,var.equal = FALSE)
+test_t
+merged_data <- data.frame(vital_status = meta_brca$vital_status, age_diagnosis = meta_brca$age_at_index, gender = meta_brca$gender)
+
+merged_data_clean <- na.omit(merged_data)
+dim(merged_data_clean)
+```
+
+Com base nos resultados apresentados, podemos concluir que há evidências
+estatísticas para afirmar que há uma diferença significativa entre as
+médias das duas amostras analisadas. A média da segunda amostra (dead)
+é, em média, maior do que a média da primeira amostra (alive), com uma
+diferença estimada de aproximadamente 3.16382 (60.94030 - 57.77648) e um
+intervalo de confiança de 95% entre -5.4465673 e -0.8810657.
+
+##Análise de género, estado vital e idade de diganóstico Esta análise
+pretende obter informações sobre os estados vitais de cada sexo em
+determinadas faixas etárias. Embora sabemos que o número de pessoas do
+sexo masculino é muito reduzida (1,1%), realizamos a análise ao dois
+sexos.
+
+```{r}
+dead_data <- subset(merged_data, merged_data$vital_status == "Dead")
+alive_data <- subset(merged_data, merged_data$vital_status == "Alive")
+col <- c("pink", "lightblue")
+dead_table <- table(dead_data$gender, cut(dead_data$age_diagnosis, breaks = seq(10, 90, 10)))
+alive_table <- table(alive_data$gender, cut(alive_data$age_diagnosis, breaks = seq(10, 90, 10)))
+colnames(dead_table) <- paste("Dead", colnames(dead_table))
+colnames(alive_table) <- paste("Alive", colnames(alive_table))
+rownames(dead_table) <- c("Female", "Male")
+rownames(alive_table) <- c("Female", "Male")
+barplot(cbind(dead_table, alive_table), beside = TRUE, col = col,
+        main = "Comparação entre o estado vital do paciente em função da faixa etária e género",
+        xlab = "Faixa etária", ylab = "Frequência",
+        legend.text = c("Female", "Male"), args.legend = list(x = "topright"))
+```
+
+Ao observar o gráfico, percebe-se que a idade mais frequente é entre os
+50-60, e percebe-se que a maioria é do sexo feminino. O sexo masculino
+verifica-se a sua presença nas idades mais avançadas, entre os 60-70.
+Conseguimos também realçar que o nosso dataset contém mais pessoas DEAD
+OU ALIVE.
+
+# Exploração dos dados
+
+```{r}
+names(rowData(data_rna_brca))
+```
+
+```{r}
+#Type
+gene_type <- rowData(data_rna_brca)$gene_type
+barplot(table(gene_type), main="Distribuição da Variável 'Gene_type'", xlab="Tipo", ylab="Contagem")
+```
+
+```{r}
+#Source
+barplot(table(rowData(data_rna_brca)$source), main="Distribuição da Variável 'Source'", xlab="Tipo", ylab="Contagem")
+```
+
+```{r}
+barplot(table(rowData(data_rna_brca)$type),main="Distribuição da Variável 'Type'", xlab="Tipo", ylab="Contagem") 
+```
+
+A partir da análise, conseguimos perceber que, para a variáveis
+"gene_type", há uma maior incidência de protein_coding. No segundo,
+observamos que a maior parte dos dados foram recolhidos da base de dados
+HAVANA, e que todos eles são reconhecidos como genes.
+
+# Filtrar as linhas que não contêm "Metastatic" na coluna "definition"
+
+Tentamos filtrar as linhas que nao contêm "metastatic" , porem nao
+funcionou.
+
+```{r}
+
+# Subset the SummarizedExperiment object to exclude metastatic rows
+data_rna_brca_subset <- data_rna_brca[data_rna_brca$definition != "Metastatic", ]
+
+# View the resulting SummarizedExperiment object
+data_rna_brca_subset$definition
+
+```
+
+## Tratamento de dados e Filtragem - Aplicação do DESeq2
+
+Para o tratamento dos dados, foi necessário definir uma condição para
+trabalhar.A coluna selecionada foi a "definition", que nos diz qual é o
+qual é o tipo do tumor. Está dividida em três categorias: Solid Tissue
+Normal or Primary Solid Tumor e Metatastic
+
+##Expressão Diferencial - Definition (Tissue Type)
+
+```{r}
+data_de <- data_rna_brca[,!is.na(data_rna_brca$definition)]
+
+ddsSE_defi <- DESeqDataSet(data_de, design = ~ definition)
+
+keep <- rowSums(counts(ddsSE_defi)) >= 10 #filtragem de genes com mais de 10 cópias
+ddsSE_defi <- ddsSE_defi[keep,]
+ddsSE_defi =DESeq(ddsSE_defi)
+
+resultsNames(ddsSE_defi)
+```
+
+As categorias a estudar serão o tumor sólido contra metastizado.
+
+```{r}
+#Tabelas de Resultados
+
+res1 <- results(ddsSE_defi, name = "definition_Primary.solid.Tumor_vs_Metastatic")
+res1
+
+
+dea1 <- as.data.frame(res1)
+
+
+plot(dea1)
+```
+
+###Exploração dos resultados- res1 Primeiro, ordenamos o resultado de
+acordo com os seus valores p-value.
+
+```{r}
+res1Ordered =res1[order(res1$padj),]
+summary(res1)
+```
+
+Número total de genes com reads diferentes de 0: 56.713
+
+Número de genes que apresentam um log2 fold change (LFC) maior que 0:
+897 genes, o que representa 1,6% do total de genes analisados. Isso
+indica que esses genes estão sobrexpressos no grupo experimental do que
+no grupo controlo.
+
+Número de genes que apresentam um log2 fold change menor que 0: 626
+genes, o que representa 1,1% do total de genes analisados. Isso indica
+que esses genes estão subexpressos no grupo experimental do que no grupo
+controlo.
+
+Percentagem de outliers: 0%
+
+Percentagem de genes com baixo valor de reads: 39%, ou seja, genes que
+têm uma contagem média inferior a 1, isso indica que esses genes são
+subexpressos e, portanto, menos confiáveis.
+
+Considerando aceitável uma percentagem de 10% de falsos positivos,
+podemos admitir que todos os genes com um valor de p adjusted abaixo de
+0.1 como significativos.
+
+```{r}
+sum(res1$padj < 0.1, na.rm=TRUE)
+```
+
+1523 genes diferencialmente expressos dos quais 897 são sobrexpressos e
+626 são subexpressos
+
+Agora subdefinimos a tabela de resultados para estes genes e
+ordenamo-los pela estimativa de log2 fold change, de modo a obtermos os
+genes significativos com a "down-regulation" mais forte...
+
+```{r}
+res1Sig <- subset(res1, padj < 0.1)
+head(res1Sig[ order(res1Sig$log2FoldChange), ])
+```
+
+... e com a "up-regulation" mais forte:
+
+```{r}
+head(res1Sig[ order(res1Sig$log2FoldChange, decreasing = TRUE), ])
+```
+
+O gene com a up-regulation mais forte, pela estimativa do log2fold, é o
+ENSG00000171201.12.
+
+**Top Gene** Corresponde ao gene com o menor valor de p adjusted.
+
+```{r}
+topgene <- rownames(res1)[which.min(res1$padj)]
+topgene
+```
+
+O gene com o menor valor p-adjusted é o ENSG00000177669.4
+
+**Exploração Gráfica com MA plot** Um gráfico MA fornece uma visão geral
+útil da distribuição dos coeficientes estimados no modelo, por exemplo,
+as comparações de interesse, em todos os genes. No eixo y, o "M"
+significa "menos" - a subtração de valores log é equivalente ao log da
+razão - e no eixo x, o "A" significa "média". Este gráfico
+permitir-nos-á visualizar as principais diferenças de expressão genética
+entre dois grupos: genes diferencialmente expressos (azul) e outros
+genes (cinzento).
+
+```{r}
+DESeq2::plotMA(res1, ylim = c(-10,10))
+with(res1[topgene, ], {
+  DESeq2::plotMA(res1, ylim = c(-7,7), main="definition_Primary.solid.Tumor_vs_Metastatic")
+  points(baseMean, log2FoldChange, col="black", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topgene, pos=2, col="black")
+})
+```
+
+**Histograma de valores p** O histograma de valores p também é um bom
+gráfico diagnóstico. Este gráfico é melhor organizado se excluirmos os
+genes com contagens muito baixas, pois podem gerar picos no histograma.
+
+```{r}
+hist(res1$pvalue[res1$baseMean > 1], breaks = 0:20/20,
+     col = "grey50", border = "white", main='Histograma de valores p')
+```
+
+Agora vamos ajustar a distribuição dos dados e melhorar a deteção de
+genes diferencialmente expressos, onde selecionamos os vinte primeiros
+genes do conjunto de resultados ordenados com base no p-value, em ordem
+crescente.
+
+```{r}
+vsd <- varianceStabilizingTransformation(ddsSE_defi, blind = FALSE)
+resOrdered <- res1[order(res1$padj),]
+select <- rownames(head(resOrdered,20))
+vsd.counts <- assay(vsd)[select,]
+df <- as.data.frame(colData(ddsSE_defi)[,c("definition")])
+
+anno <- as.data.frame(colData(vsd)[, c("definition", "vital_status")])
+
+pheatmap(vsd.counts, show_colnames = F, annotation_col =anno , main="20 genes com maior diferença de expressão\n entre os tecidos Primary solid Tissue e Metastatic")
+```
+
+Neste heatmapp a maioria das colunas possui cor azul, isso pode indicar
+que há pouca expressão de diferentes genes nos tecidos Primary solid and
+metastatic, enquanto os genes que estão com cor laranja têm maior
+expressão nos tecidos.
+
+### Análise de Enriquecimento
+
+A análise de enriquecimento é uma técnica utilizada na análise de dados
+genómicos para identificar conjuntos de genes ou termos funcionais que
+estão enriquecidos em uma lista de genes de interesse e tem como
+objetivo determinar se um grupo de genes específico ocorre com uma
+frequência maior do que o esperado por acaso.
+
+```{r}
+get_entrez <- function(x){unlist(strsplit(x, split="[.]+"))[2]}
+enr <- select(org.Hs.eg.db,keys=sapply(rownames(res1), get_entrez),columns=c("ENTREZID","SYMBOL","GENENAME"))
+head(enr)
+res_enr <- cbind(res1, enr)
+head(res_enr)
+```
+
+O enriquecimento é um processo cujo objetivo é aumentar a quantidade e a
+qualidade de informações de um conjunto de dados. Neste processo,
+adicionamos três colunas aos dados originais, ENTREZID, SYMBOL e
+GENENAME.
+
+**Seleção**
+
+```{r}
+data_rna_brca
+subset_data <- data_rna_brca[1:10,] 
+summary(subset_data)
+```
+
+#PCA O PCA (Principal Component Analysis) é uma técnica estatística que
+transforma um conjunto de dados de alta dimensão em um conjunto de
+componentes principais não correlacionados, permitindo a redução da
+dimensionalidade e a identificação dos principais padrões de
+variabilidade nos dados.
+
+```{r}
+pca_res = prcomp(as.matrix(assay(subset_data)), scale = TRUE)
+pca_res
+```
+
+```{r}
+summary(pca_res)
+plot(pca_res, ylim = c(0,100))
+```
+
+Os componentes principais são ordenados por importância, onde o primeiro
+componente principal captura a maior quantidade de variância nos dados,
+o segundo componente principal captura a segunda maior quantidade de
+variância e assim por diante. Isso permite reduzir a dimensionalidade
+dos dados, mantendo a maior parte da variação original.
+
+```{r}
+pca_res$rotation
+```
+
+```{r}
+biplot(pca_res)
+```
+
+Para determinar o número mínimo de componentes principais necessários
+para explicar pelo menos 90% da variância total dos dados...
+
+```{r}
+min(which(summary(pca_res)$importance[3,]>0.9))
+
+```
+
+...percebemos que são necessários 5 componentes para explicar pelo menos
+90% da variância total dos dados. **Gráfico de dispersão dos dados dos
+componentes principais da análise de PCA**
+
+```{r}
+plot(pca_res$x, col = ddsSE_defi$definition, pch = 16) 
+```
+
+Ao examinar o gráfico de dispersão dos dados dos componentes
+principais,podemos observar a separação entre os pontos.A separação dos
+pontos pode ocorrer quando diferentes grupos de pontos têm correlações
+distintas entre as variáveis originais. Isso significa que as variáveis
+originais têm associações diferentes em cada grupo, e essas diferenças
+se refletem nos componentes principais e, consequentemente, na posição
+dos pontos no gráfico de dispersão.
+
+```{r}
+summary(pca_res$rotation[, 1:2])
+```
+
+As colunas PC1 e PC2 apresentam estatísticas como o valor mínimo,
+primeiro quartil, mediana, média, terceiro quartil e valor máximo dos
+pesos correspondentes às variáveis originais no componente principal
+PC1.
+
+Essas estatísticas fornecem informações sobre a distribuição dos pesos
+das variáveis e sua contribuição para a formação desses componentes
+principais. Essas informações podem ser úteis para entender quais
+variáveis têm maior influência nos componentes principais e como elas
+contribuem para a variabilidade dos dados.
+
+#SDV - Singular Value Decomposition Pode ser usado para identificar
+variáveis dependentes de outras, que podem ser removidas no processo de
+análise de dados A PCA é um caso particular da SVD, sendo a SVD um dos
+métodos aconselhados para calcular a PCA.
+
+```{r}
+svd_res = svd(scale(as.matrix(assay(ddsSE_defi))))
+svd_res$v
+```
+
+```{r}
+plot(pca_res$rotation[, 1], svd_res$v[, 1])
+```
+
+Os pontos mostram estar todos muito próximos/ agregados, o que pode
+indicar a presença de agrupamentos ou clusters nos dados o que sugere a
+existência de subgrupos ou padrões distintos nos dados.
+
+Esta observação pode ser explorada por meio de técnicas de análise de
+agrupamentos, como o alguritmo de clustering realizado mais adiante.
+
+#TSNE O t-SNE (t-Distributed Stochastic Neighbor Embedding) é uma
+técnica de redução de dimensionalidade não linear amplamente utilizada
+para visualização de dados e é projetado para mapear dados de alta
+dimensão em um espaço de menor dimensão, enquanto preserva as relações
+de proximidade entre os pontos.
+
+```{r}
+library(Rtsne)
+rtsne_res = Rtsne(assay(ddsSE_defi))
+```
+
+```{r}
+plot(rtsne_res$Y, col = ddsSE_defi$definition)
+```
+
+Neste grafico são observados 2 clusters bastantes proximos, isto indica
+que são há muita similarridade entre eles. A area com alta densidade dos
+pontos pode indicar que é uma regiao importante nos dados.
+
+#Clustering
+
+```{r}
+ddsse_defi_rank<-subset_data
+```
+
+```{r}
+df_subset = data.frame(as.matrix(assay(subset_data)))
+class(df_subset)
+```
+
+```{r}
+
+dis_eucl = dist(df_subset)
+dis_eucl
+```
+
+```{r}
+clustering_hier = hclust(dis_eucl)
+plot(clustering_hier)
+```
+
+```{r}
+clustering_hier1 = hclust(dis_eucl,method = "single")
+plot(clustering_hier1)
+```
+
+```{r}
+clustering_hier11 = hclust(dis_eucl, method = "average")
+plot(clustering_hier11)
+```
+
+#Análise preditiva/Aprendizagem máquina Aprendizagem máquina, também
+conhecido como machine learning, é um subcampo da inteligência
+artificial que se concentra no desenvolvimento de algoritmos e modelos
+capazes de aprender e tomar decisões automáticas a partir de dados. O
+objetivo principal da aprendizagem de máquina é capacitar os
+computadores a executarem tarefas sem serem explicitamente programados,
+mas sim aprendendo com os dados fornecidos. Primeiramente definimos os
+dados com que vamos trabalhar como um dataframe.
+
+```{r}
+df_defi = data.frame(as.matrix(assay(subset_data)))
+```
+
+De seguida, criamos um novo data frame, que consiste em duas colunas:
+group, que contém as definições de grupo dos tecidos amostrados, e os
+valores de df_defi transpostos para formar as outras colunas. Essa
+estrutura é útil para realizar análises e visualizações subsequentes.
+
+```{r}
+df_defi_met=data.frame(group = colData(subset_data)$definition, t(df_defi))
+df_defi_met$group
+pie(table(df_defi_met$group))
+```
+
+O pie chart que mostra a distribuição das definições de grupo dos
+tecidos amostrados. Verificamos uma fatia muito maior em Primary solid
+Tumor do que nas restantes.
+
+É agora gerado um vetor chamado ind com números aleatórios entre 1 e 2.
+O comprimento deste vetor é igual ao número de linhas em df_defi_met.
+Isso é usado para dividir os dados em conjuntos de treino e teste. A
+probabilidade de seleção de cada número é determinada pelas proporções
+especificadas em prob.
+
+```{r}
+ind = sample(2, nrow(df_defi_met), replace = T, prob=c(0.7, 0.3))
+ind
+```
+
+Seleção dos dados de treino e de teste, 70 e 30%, respetivamente
+
+```{r}
+train_data = df_defi_met[ind==1,]
+test_data = df_defi_met[ind==2,]
+train_data = na.omit(train_data)
+test_data = na.omit(test_data)
+dim(train_data)
+dim(test_data)
+table(train_data$group)
+table(test_data$group)
+```
+
+A dimensão do grupo de treino é 855 amostras (linhas) e 11 variáveis
+(colunas). A dimensão do grupo de teste é 376 amostras (linhas) e 11
+variáveis (colunas).
+
+A contagem de cada grupo no conjunto de treino mostra que no grupo
+"Metastatic" existem 5 amostras, no grupo "Primary solid Tumor" existem
+770 amostras e no grupo "Solid Tissue Normal" existem 80 amostras.
+
+A contagem de cada grupo no conjunto de teste mostra que no grupo
+"Metastatic" existem 2 amostras, no grupo "Primary solid Tumor" existem
+341 amostras e no grupo "Solid Tissue Normal" existem 33 amostras.
+
+(Estes resultados de cada vez que se corre o sample podem variar pois as
+escolha dos dados é aleatoria.)
+
+## K vizinhos mais próximos
+
+O algoritmo dos k vizinhos mais próximos (KNN) é um método de
+classificação e regressão utilizado em aprendizagem máquina. No KNN, os
+dados de treino são utilizados para construir um modelo. Durante a etapa
+de predição, o algoritmo compara a nova amostra de entrada com os dados
+de treino e classifica ou estima o valor da amostra com base nos "k"
+vizinhos mais próximos.
+
+Quando se trabalha com algoritmos de aprendizado de máquina, pode ser
+útil transformar os conjuntos de dados em valores numéricos para
+realizar suas operações corretamente.Por isso, primeiro, convertemos os
+conjuntos de dados em valres numéricos.
+
+```{r}
+train_data$group <- factor(train_data$group)
+train_data$group <- as.numeric(train_data$group)
+test_data$group <- factor(test_data$group)
+test_data$group <- as.numeric(test_data$group)
+
+```
+
+```{r}
+library(class)
+knn_pred <- knn(train_data, test_data, train_data$group)
+knn_pred
+```
+
+Métricas de avaliação do modelo:
+
+```{r}
+t = table(knn_pred, test_data$group)
+pecc <- function(obs,pred)sum(obs==pred)/length(obs)
+pecc(knn_pred, test_data$group)
+
+vp <- t[2,2]
+vn <- t[1,1]+t[3,3]
+fp <- t[2,1]+t[2,3]
+fn <- t[1,2] + t[3,2]
+
+sensi <- vp/(vp+fn)
+sensi
+
+especif <- vn/(vn+fp)
+especif
+```
+
+Para avaliar o modelo, foram utilizadas diferentes métricas: - PECC: é
+uma medida comum para avaliar a acurácia de um modelo de classificação.
+É calculado dividindo o número de observações classificadas corretamente
+pelo total de observações. Para este caso, o modelo classificou
+corretamente cerca de 94,19% das observações. Assim, podemos dizer que o
+modelo tem um bom desempenho na tarefa de classificação
+
+-   Sensibilidade: A sensibilidade, também conhecida como taxa de
+    verdadeiros positivos ou recall, mede a proporção de casos positivos
+    corretamente identificados em relação ao total de casos positivos. O
+    valor retornado foi 0.9737609, o que significa que este modelo
+    identificou corretamente cerca de 97.37% dos casos positivos.Assim,
+    podemos dizer que o modelo tem uma alta taxa de sucesso em
+    idntificar corretamente os casos que pertencem à classe positiva.
+
+-   Especificidade: A especificidade mede a proporção de casos negativos
+    corretamente identificados em relação ao total de casos negativos. O
+    valor retornado foi 0.6388889, o que significa que o modelo
+    identificou corretamente cerca de 63.88% dos casos negativos.Isto
+    indica que o modelo tem uma taxa não muito boa de sucesso em
+    identificar corretamente os casos que pertencem à classe negativa.
+
+### Modelos Bayesianos
+
+Os modelos bayesianos são uma abordagem estatística que utiliza o
+teorema de Bayes para realizar inferências e tomar decisões. Eles são
+amplamente usados no contexto de aprendizagem máquina para modelar a
+incerteza e lidar com problemas de classificação, regressão e outros.
+Ideia base: -- calcular as probabilidades associadas à pertença de um
+exemplo a cada uma das possíveis classes -- usar as frequências de
+co-ocorrência dos valores da classe e dos valores para os atributos de
+entrada Assunções (que raramente se verificam na realidade) -- todos os
+atributos têm a mesma importância -- valores para os diversos atributos
+ocorrem de forma independente
+
+```{r}
+library(e1071)
+model = naiveBayes(group ~ ., train_data)
+nb_pred = predict(model, test_data)
+nb_pred
+table(nb_pred, test_data$group)
+pecc(test_data$group, nb_pred)
+acc <- sum(nb_pred == test_data$group)/length(test_data$group)
+acc
+```
+
+A matriz de previsões (nb_pred) mostra as classes previstas pelo modelo
+para cada observação do conjunto de teste. Cada número na matriz
+representa a classe prevista para uma combinação de linhas e colunas.
+Por exemplo, na célula (1,2) da matriz, temos um valor de 11, o que
+significa que o modelo previu a classe 2 para 11 observações.
+
+A matriz de confusão mostra uma contagem dos casos correta e
+incorretamente classificados pelo modelo para cada combinação de classes
+reais e previstas. Por exemplo, na célula (2,2) da tabela, temos um
+valor de 307, o que significa que o modelo corretamente classificou 307
+observações como classe 2.
+
+O valor retornado pela taxa de acerto (PECC), que representa a proporção
+de observações corretamente classificadas em relação ao total de
+observações. O valor retornado foi 0.878628, o que inidca que cerca de
+87.86% das observações foram classificadas corretamente.
+
+Obteve-se também um valor de acurácia de 0.878628, acurácia, o que
+signficia que este modelo está a prever corretamente 87.86% das
+instâncias avaliadas.
+
+Portanto, com base nessas métricas, podemos interpretar que o modelo
+bayesiano obteve uma acurácia de aproximadamente 87.86%, o que indica um
+bom desempenho geral na classificação das observações do conjunto de
+teste.
+
+**Comparação dos modelos** O modelo k-NN alcançou um desempenho sólido
+na tarefa de classificação. A acurácia do modelo foi de cerca de 94,19%,
+o que significa que ele classificou corretamente a maioria das
+observações do conjunto de teste. Além disso, a sensibilidade do modelo
+foi de aproximadamente 97.37%, indicando que ele identificou
+corretamente a maioria dos casos positivos. A especificidade, por sua
+vez, foi de cerca de 63.88%, o que significa que o modelo teve um
+desempenho não muito bom na identificação dos casos negativos.
+
+Já o modelo Bayesiano obteve uma taxa de acerto (PECC) de
+aproximadamente 0.878628, o que indica que cerca de 87.86% das
+observações do conjunto de teste foram classificadas corretamente. Além
+disso, a acurácia do modelo também foi de 87.86%, mostrando que ele está
+prevendo corretamente uma percentagem significativa das instâncias
+avaliadas.
+
+Em comparação, o modelo k-NN apresentou uma acurácia superior e uma
+sensibilidade mais alta do que o modelo Bayesiano. No entanto, o modelo
+Bayesiano ainda obteve um desempenho aceitável na classificação das
+observações do conjunto de teste, com uma taxa de acerto em torno de
+87.86%. Portanto, ambos os modelos podem ser considerados úteis em suas
+respetivas capacidades de classificação, mas o modelo kNN destacou-se
+com uma acurácia mais elevada e maior sensibilidade na deteção dos casos
+positivos.
+
+### Árvores de decisão
+
+As árvores de decisão são um tipo de algoritmo de aprendizagem máquina
+que utiliza uma estrutura em forma de árvore para tomar decisões com
+base em atributos dos dados de entrada. Cada nó interno da árvore
+representa um teste em um atributo, e cada ramo representa o resultado
+do teste. As folhas da árvore contêm as decisões ou as previsões finais.
+
+```{r}
+library(party)
+data_ctree <- ctree(group ~., data=train_data)
+print(data_ctree)
+data_ctree
+```
+
+```{r}
+plot(data_ctree)
+```
+
+A árvore de decisão apresentada é um modelo de classificação condicional
+baseado em inferência. Possui 10 nós terminais e é aplicado ao problema
+de classificar observações em diferentes grupos.
+
+A resposta do modelo é a variável "group", enquanto as entradas (inputs)
+são as seguintes características: "ENSG00000000003.15",
+"ENSG00000000005.6", "ENSG00000000419.13", "ENSG00000000457.14",
+"ENSG00000000460.17", "ENSG00000000938.13", "ENSG00000000971.16",
+"ENSG00000001036.14", "ENSG00000001084.13", "ENSG00000001167.14"
+
+A árvore é construída de forma recursiva, dividindo as observações com
+base nas características e aplicando critérios estatísticos. Cada nó da
+árvore representa uma condição e o número do nó é indicado entre
+parênteses.
+
+Se "ENSG00000000971.16" for menor ou igual a 4569, vá para o nó 2. Caso
+contrário, vá para o nó 13. Se "ENSG00000000460.17" for menor ou igual a
+374, vá para o nó 3. Caso contrário, vá para o nó 12. Se
+"ENSG00000000971.16" for menor ou igual a 3073, vá para o nó 4. Caso
+contrário, vá para o nó 9. ... O processo continua de forma recursiva,
+avaliando diferentes características e fazendo divisões com base nos
+critérios estatísticos, até alcançar os nós terminais. Os nós terminais
+(marcados com asterisco) atribuem um grupo específico às observações com
+base nas características avaliadas durante a construção da árvore.
+
+Podemos concluir que a característica ENSG00000000971.16 desempenha um
+papel importante na classificação dos grupos uma vez que é usada como o
+primeiro critério para dividir as observações, indicando sua relevância
+na determinação dos grupos.
+
+## Análise discriminante
+
+Na análise discriminante realizada utilizando a função lda os resultados
+mostram as estatísticas e os coeficientes relacionados ao modelo
+discriminante linear.
+
+```{r}
+library(MASS)
+lda.model = lda(group ~., train_data)
+lda.model
+
+#pecc(test.lda$class, test_data$group)
+
+```
+
+A função lda ajusta um modelo LDA usando as variáveis preditoras do
+conjunto de treino para prever a variável de resposta (group). A saída
+lda.model exibe as informações sobre o modelo ajustado, incluindo as
+probabilidades anteriores das classes, as médias das variáveis
+preditoras por grupo e os coeficientes dos discriminantes lineares.
+
+A probabilidade anterior das classes indica a probabilidade de cada
+grupo no conjunto de treino. No exemplo apresentado, temos três grupos:
+1, 2 e 3, com probabilidades anteriores de0.0047, 0.9014 e 0.0939,
+respetivamente.Isto sugere que o grupo 2 tem a maior proporção de
+observações no conjunto de treino.
+
+A proporção da variância explicada pelos discriminantes indica a
+importância relativa dos discriminantes lineares na explicação da
+variação nos dados. Neste caso, o primeiro discriminante (LD1) explica
+cerca de 98.2% da variância total, enquanto o segundo discriminante
+(LD2) explica cerca de 1.8% da variância total.
+
+##Random Forest Uma Random Forest é um algoritmo de aprendizagem máquina
+que combina várias árvores de decisão individuais para criar um modelo
+mais robusto e preciso. Cada árvore de decisão é treinada numa amostra
+aleatória dos dados de treinamento e produz uma previsão. A previsão
+final da Random Forest é determinada pela média (no caso de problemas de
+regressão) ou pela votação (no caso de problemas de classificação) das
+previsões de todas as árvores.
+
+```{r}
+library(randomForest)
+set.seed(12345)
+data.rf = randomForest(group ~ ., data=train_data, importance=TRUE)
+pred.rf = predict(data.rf, test_data)
+pecc <- function(obs,pred)sum(obs==pred)/length(obs)
+pecc(pred.rf, test_data$group)
+```
+
+Nesse caso, a taxa de acerto de aproximadamente 0.09234828 significa que
+a Random Forest acertou a classificação de cerca de 9.23% das
+observações do conjunto de teste. Esta taxa e considerada baixa,
+indicando um desempenho insatisfatório do modelo.
+
+#Seleção e Importância dos genes
+
+Foi selecionado o gene ENSG00000000971.16 que corresponde ao complento
+fator H. O factor H (FH) é um inibidor do complemento que desempenha um
+papel em várias funções celulares. O fenótipo dos monócitos estimulados
+com FH tem sido inexplorado. Foi estabelecido que a FH influencia a
+viabilidade, diferenciação e polarização de monócitos, o que pela
+primeira vez define a FH como um indutor da diferenciação de monócitos
+humanos primários em macrófagos imunossupressores. Além disso este
+fenómeno é importante no cancro da mama, uma vez que mostrou-se que a
+expressão de FH no cancro da mama se correlaciona positivamente com a
+presença de macrófagos imunossupressores (CD163+) em tumores humanos. Em
+resumo, foi demostrado que a FH desempenha um papel na modulação do
+microambiente tumoral no cancro da mama, propondo-se que a FH produzida
+pelas células tumorais induz a diferenciação dos macrófagos num subtipo
+imunossupressor que suprime o sistema imunitário através de vários
+mecanismos, incluindo alterações na libertação de citocinas e no
+metabolismo, bem como a inibição das respostas das células T. As
+alterações imunossupressoras no microambiente, mediadas pela FH, devem
+ser tidas em consideração para aumentar a eficácia das imunoterapias
+contra o cancro da mama.
+
+#Referências:
+
+Smolag, K. I., Mueni, C. M., Leandersson, K., Jirström, K., Hagerling,
+C., Mörgelin, M., ... & Blom, A. M. (2020). Complement inhibitor factor
+H expressed by breast cancer cells differentiates CD14+ human monocytes
+into immunosuppressive macrophages. Oncoimmunology, 9(1), 1731135.
