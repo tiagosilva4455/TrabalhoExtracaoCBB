@@ -29,19 +29,14 @@ library(pheatmap)
 ## Importação de dados de expressão e metadados
 
 ```{r}
-proj <- "TCGA-BRCA"
-query <- GDCquery(
-  project = proj,
-  data.category = "Transcriptome Profiling", 
-  data.type = "Gene Expression Quantification",
-  workflow.type = "STAR - Counts"
-)
+load("TCGA_BRCA.rda")
 
-data_rna_brca  <- GDCprepare(query, summarizedExperiment = TRUE, save = TRUE, save.filename = "TCGA_BRCA.rda")
+data_rna_brca  <- data
 
 ```
 
-### Análise visual dos dados e do seu conteúdo e dimensão
+
+### Análise visual dos dados e do seu conteúdo e dimensão 
 
 **Dados na matriz de contagens/"assay"**
 
